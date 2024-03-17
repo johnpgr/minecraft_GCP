@@ -31,13 +31,18 @@ functions.http('authorize_ip', async (req, res) => {
         return;
     }
 
-    const sourceIp = req.get('x-forwarded-for');
-    const _isIpv4 = isIpv4(sourceIp);
+    const sourceIp = isIpv4(req.get('x-forwarded-for')) ? req.get('x-forwarded-for') : req.query.ipv4_addr;
+    if (!sourceIp) {
+        console.error('Error: request ip address not found\n req_headers: ' + JSON.stringify(req.headers));
+        res.status(400).redirect('/get-ipv4');
+        return;
+    }
 
-    const sourceRangeStr = _isIpv4 ? sourceIp + '/32' : sourceIp + '/128';
-    const fwName = instance + 'fw-rule-for-' + _isIpv4 ? sourceIp.replaceAll('.', '') : sourceIp.replaceAll(':', '');
+    const sourceRangeStr = sourceIp + '/32'
+    const fwName = `${instance}-fw-rule-for-${sourceIp.replaceAll('.', '-')}`;
     const description = req.get('User-Agent');
-    console.log('Inserting new firewall rule for ip: ' + sourceIp);
+
+    console.log('Inserting new firewall rule for ip: ' + sourceIp + '\nFirewall name: ' + fwName);
 
     const tcpPortFwRule = fwClient.insert({
         project,
@@ -58,11 +63,10 @@ functions.http('authorize_ip', async (req, res) => {
     });
 
     await tcpPortFwRule
-        .catch(() => {
-            console.error('Error: An firewall rule for ip:' + sourceIp + ' already exists.');
-            res.status(400).send('Seu ip ja foi autorizado no servidor.');
+        .catch((err) => {
+            console.error(`Failed to insert firewall rule for: ${sourceIp}\n${err}`)
+            res.status(500).send(`Falha ao autorizar ip.\n${err.message}`);
         }).then(() => {
-            console.log('Ip authorized: ' + sourceIp);
             res.status(200).send('Seu Ip: ' + sourceIp + ' foi autorizado no servidor. Ip do servidor: ' + serverIp + ':25565');
         })
 })
